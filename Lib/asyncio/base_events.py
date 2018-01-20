@@ -647,6 +647,71 @@ class BaseEventLoop(events.AbstractEventLoop):
         return await self.run_in_executor(
             None, socket.getnameinfo, sockaddr, flags)
 
+    async def sock_sendfile(self, sock, file, offset=0, count=None,
+                            *, fallback=True):
+        if self._debug and sock.gettimeout() != 0:
+            raise ValueError("the socket must be non-blocking")
+        self._check_sendfile_params(sock, file, offset, count)
+        try:
+            return await self._sock_sendfile_native(sock, file,
+                                                    offset, count)
+        except events.SendfileNotAvailableError as exc:
+            if not fallback:
+                raise
+        return await self._sock_sendfile_fallback(sock, file,
+                                                  offset, count)
+
+    async def _sock_sendfile_native(self, sock, file, offset, count):
+        # NB: sendfile syscall is not supported for SSL sockets and
+        # non-mmap files even if sendfile is supported by OS
+        raise events.SendfileNotAvailableError(
+            f"syscall sendfile is not available for socket {sock!r} "
+            "and file {file!r} combination")
+
+    async def _sock_sendfile_fallback(self, sock, file, offset, count):
+        if offset:
+            file.seek(offset)
+        blocksize = min(count, 16384) if count else 16384
+        buf = bytearray(blocksize)
+        total_sent = 0
+        try:
+            while True:
+                if count:
+                    blocksize = min(count - total_sent, blocksize)
+                    if blocksize <= 0:
+                        break
+                view = memoryview(buf)[:blocksize]
+                read = file.readinto(view)
+                if not read:
+                    break  # EOF
+                await self.sock_sendall(sock, view)
+                total_sent += read
+            return total_sent
+        finally:
+            if total_sent > 0 and hasattr(file, 'seek'):
+                file.seek(offset + total_sent)
+
+    def _check_sendfile_params(self, sock, file, offset, count):
+        if 'b' not in getattr(file, 'mode', 'b'):
+            raise ValueError("file should be opened in binary mode")
+        if not sock.type == socket.SOCK_STREAM:
+            raise ValueError("only SOCK_STREAM type sockets are supported")
+        if count is not None:
+            if not isinstance(count, int):
+                raise TypeError(
+                    "count must be a positive integer (got {!r})".format(count))
+            if count <= 0:
+                raise ValueError(
+                    "count must be a positive integer (got {!r})".format(count))
+        if not isinstance(offset, int):
+            raise TypeError(
+                "offset must be a non-negative integer (got {!r})".format(
+                    offset))
+        if offset < 0:
+            raise ValueError(
+                "offset must be a non-negative integer (got {!r})".format(
+                    offset))
+
     async def create_connection(
             self, protocol_factory, host=None, port=None,
             *, ssl=None, family=0,
