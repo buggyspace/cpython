@@ -859,64 +859,6 @@ static PyMappingMethods odict_as_mapping = {
  * OrderedDict methods
  */
 
-/* __delitem__() */
-
-PyDoc_STRVAR(odict_delitem__doc__, "od.__delitem__(y) <==> del od[y]");
-
-/* __eq__() */
-
-PyDoc_STRVAR(odict_eq__doc__,
-"od.__eq__(y) <==> od==y.  Comparison to another OD is order-sensitive \n\
-        while comparison to a regular mapping is order-insensitive.\n\
-        ");
-
-/* forward */
-static PyObject * odict_richcompare(PyObject *v, PyObject *w, int op);
-
-static PyObject *
-odict_eq(PyObject *a, PyObject *b)
-{
-    return odict_richcompare(a, b, Py_EQ);
-}
-
-/* __init__() */
-
-PyDoc_STRVAR(odict_init__doc__,
-"Initialize an ordered dictionary.  The signature is the same as\n\
-        regular dictionaries.  Keyword argument order is preserved.\n\
-\n\
-        ");
-
-/* forward */
-static int odict_init(PyObject *self, PyObject *args, PyObject *kwds);
-
-/* __iter__() */
-
-PyDoc_STRVAR(odict_iter__doc__, "od.__iter__() <==> iter(od)");
-
-static PyObject * odict_iter(PyODictObject *self);  /* forward */
-
-/* __ne__() */
-
-/* Mapping.__ne__() does not have a docstring. */
-PyDoc_STRVAR(odict_ne__doc__, "");
-
-static PyObject *
-odict_ne(PyObject *a, PyObject *b)
-{
-    return odict_richcompare(a, b, Py_NE);
-}
-
-/* __repr__() */
-
-PyDoc_STRVAR(odict_repr__doc__, "od.__repr__() <==> repr(od)");
-
-static PyObject * odict_repr(PyODictObject *self);  /* forward */
-
-/* __setitem__() */
-
-PyDoc_STRVAR(odict_setitem__doc__, "od.__setitem__(i, y) <==> od[i]=y");
-
 /* fromkeys() */
 
 /*[clinic input]
@@ -1370,25 +1312,8 @@ OrderedDict_move_to_end_impl(PyODictObject *self, PyObject *key, int last)
 
 static PyMethodDef odict_methods[] = {
 
-    /* explicitly defined so we can align docstrings with
-     * collections.OrderedDict */
-    {"__delitem__",     (PyCFunction)odict_mp_ass_sub,  METH_NOARGS,
-     odict_delitem__doc__},
-    {"__eq__",          (PyCFunction)odict_eq,          METH_NOARGS,
-     odict_eq__doc__},
-    {"__init__",        (PyCFunction)odict_init,        METH_NOARGS,
-     odict_init__doc__},
-    {"__iter__",        (PyCFunction)odict_iter,        METH_NOARGS,
-     odict_iter__doc__},
-    {"__ne__",          (PyCFunction)odict_ne,          METH_NOARGS,
-     odict_ne__doc__},
-    {"__repr__",        (PyCFunction)odict_repr,        METH_NOARGS,
-     odict_repr__doc__},
-    {"__setitem__",     (PyCFunction)odict_mp_ass_sub,  METH_NOARGS,
-     odict_setitem__doc__},
-    ORDEREDDICT_FROMKEYS_METHODDEF
-
     /* overridden dict methods */
+    ORDEREDDICT_FROMKEYS_METHODDEF
     {"__sizeof__",      (PyCFunction)odict_sizeof,      METH_NOARGS,
      odict_sizeof__doc__},
     {"__reduce__",      (PyCFunction)odict_reduce,      METH_NOARGS,
@@ -2359,7 +2284,10 @@ mutablemapping_update(PyObject *self, PyObject *args, PyObject *kwargs)
             goto handle_kwargs;
         }
 
-        func = _PyObject_GetAttrId(other, &PyId_keys);
+        if (_PyObject_LookupAttrId(other, &PyId_keys, &func) < 0) {
+            Py_DECREF(other);
+            return NULL;
+        }
         if (func != NULL) {
             PyObject *keys, *iterator, *key;
             keys = _PyObject_CallNoArg(func);
@@ -2391,15 +2319,11 @@ mutablemapping_update(PyObject *self, PyObject *args, PyObject *kwargs)
                 return NULL;
             goto handle_kwargs;
         }
-        else if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+
+        if (_PyObject_LookupAttrId(other, &PyId_items, &func) < 0) {
             Py_DECREF(other);
             return NULL;
         }
-        else {
-            PyErr_Clear();
-        }
-
-        func = _PyObject_GetAttrId(other, &PyId_items);
         if (func != NULL) {
             PyObject *items;
             Py_DECREF(other);
@@ -2412,13 +2336,6 @@ mutablemapping_update(PyObject *self, PyObject *args, PyObject *kwargs)
             if (res == -1)
                 return NULL;
             goto handle_kwargs;
-        }
-        else if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
-            Py_DECREF(other);
-            return NULL;
-        }
-        else {
-            PyErr_Clear();
         }
 
         res = mutablemapping_add_pairs(self, other);
